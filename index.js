@@ -1,7 +1,10 @@
+require('dotenv').config()
 const express = require('express')
 const morgan = require('morgan')
 const cors = require('cors')
 const app = express()
+const Note = require('./models/note')
+
 
 const requestLogger = (request, response, next) => {
   console.log('Method: ', request.method)
@@ -15,105 +18,104 @@ app.use(express.static('dist'))
 app.use(cors())
 app.use(express.json())
 app.use(requestLogger)
-app.use(morgan(function (tokens, req, res) {
-  return [
-    tokens.method(req, res),
-    tokens.url(req, res),
-    tokens.status(req, res),
-    tokens.res(req, res, 'content-length'), '-',
-    tokens['response-time'](req, res), 'ms'
-  ].join(' ')
-}))
 
-let notes = [
-  {
-    id: 1,
-    content: "HTML is easy",
-    important: true
-  },
-  {
-    id: 2,
-    content: "Browser can execute only JavaScript",
-    important: false
-  },
-  {
-    id: 3,
-    content: "GET and POST are the most important methods of HTTP protocol",
-    important: true
-  }
-]
+const mongoose = require('mongoose')
 
-app.get('/api/notes/', (request, response) => {
-  response.json(notes)
-})
+const url = process.env.MONGODB_URI
 
-app.get('/info/', (request, response) => {
-  response.send(`Notes array currently holds ${notes.length} notes`)
-})
+mongoose.set('strictQuery',false)
+mongoose.connect(url)
 
-app.get('/api/notes/:id', (request, response) => {
-  const id = Number(request.params.id)
-  const note = notes.find(n => n.id === id)
-  note? response.send(`Note id: ${id}, note content: ${note.content}, importance: ${note.important.toString()}`)
-  : response.status(404).end()
-})
-
-app.delete('/api/notes/:id', (request, response) => {
-  const id = request.params.id
-  notes = notes.filter(n => n.id != id)
-  response.status(204).end()
-})
-
+// Create a note
 app.post('/api/notes/', (request, response) => {
-  const {id, content, important} = request.body
+  const body = request.body             // reads JSON parsed body of request and stores it
 
-  const found = notes.find(n => n.id === id)
-
-  if (found) {
-    return response.status(409).json({ error: 'ID must be unique' });
+  if (body.content === undefined) {     // checks if request body has content
+    return response.status(400).json({  // if it has no content, returns an error
+      error: 'content missing'
+    })
   }
+  
+  const newNote = new Note({            // creates Note based on noteSchema 
+    content: body.content,              // using request body
+    important: body.important || false,
+  })
 
-  const newNote = {
-    id,
-    content,
-    important
-  }
-
-  notes = notes.concat(newNote)
-  response.status(200).json(notes)
+  newNote.save().then(result => {       // saves newNote to mongoDB collection and returns
+    response.json(result)               // it in the response
+  })
 })
 
+// Fetch all notes
+app.get('/api/notes/', (request, response) => {
+  Note.find({}).then(fetchedNotes => {
+    response.json(fetchedNotes)
+  })
+})
 
+// Fetch note by id
+app.get('/api/notes/:id', (request, response, next) => {
 
-app.put('/api/notes/:id', (request, response) => {
-    const id = Number(request.params.id)
-    const {content, important} = request.body
-    const found = notes.find(n => n.id === id)
+  Note.findById(request.params.id)
+    .then(foundNote => {
+      if (foundNote) {
+        response.json(foundNote)
+      } else {
+        response.status(404).end()
+      }
+    })
+    .catch(error => next(error))
 
-    if (!found) {
-      return response.status(400).json({ error: `Note with id ${id} not found`})
-    }
+})
 
-    const newNote = {
-      id,
-      content,
-      important
-    }
+// Change a note by id
+app.put('/api/notes/:id', (request, response, next) => {
     
-    notes = notes.map(n => n.id === id? newNote : n)
-    response.status(200).json(notes)
+  const body = request.body
+
+  const note = {
+    content: body.content,
+    important: body.important
+  }
+
+  Note.findByIdAndUpdate(request.params.id, note, { new: true })
+    .then(updatedNote => {
+      response.json(updatedNote)
+    })
+    .catch(error => next(error))
 
 })
 
+// Delete a note by id
+app.delete('/api/notes/:id', (request, response, next) => {
+  
+  Note.findByIdAndDelete(request.params.id)
+    .then(result => {
+      response.status(204).end()
+    })
+    .catch(error => next(error))
 
+})
 
 const unknownEndpoint = (request, response) => {
-  response.status(404).send({ error: 'unknown endpoint' })
+  response.status(404).json({ error: 'unknown endpoint' })
+}
+
+const errorHandler = (error, request, response, next) => {
+  console.error(error.message)
+
+  if (error.name === 'CastError') {
+    return response.status(400).json({ error: 'malformatted id' })
+  }
+
+  next(error)
+
 }
 
 app.use(unknownEndpoint)
+app.use(errorHandler)
 
-const PORT = process.env.PORT || 5174
+const PORT = process.env.PORT
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
-})  
+})
