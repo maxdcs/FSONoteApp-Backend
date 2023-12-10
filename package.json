@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "build:ui": "rm -rf dist && cd ../frontend && npm run build && cp -r dist ../backend",
-    "deploy:full": "npm run build:ui && git add . && git commit -m \"Create login form and store token in localStorage\" && git push",
+    "deploy:full": "npm run build:ui && git add . && git commit -m \"Move login and note state to LoginForm and NoteForm\" && git push",
     "test": "jest --verbose"
   },
   "author": "",
